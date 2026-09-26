@@ -1,0 +1,63 @@
+# openspec/config.yaml
+schema: spec-driven
+
+context: |
+  Project: sis-frio - IoT cold-chain temperature monitoring (not a git repo).
+  Firmware: Arduino C++ sketches for ESP32-C3 in firmware/ (sensor_node, test_sensor, diag_bus); DS18B20 on GPIO4 via OneWire + DallasTemperature; PubSubClient for MQTT.
+  Infra: infra/docker-compose.yml - eclipse-mosquitto:2 (:1883, anonymous, LAN dev only) and nodered/node-red (:1880).
+  Topics: frio/<site>/cam<N>/temp (plain float payload), frio/<site>/status (retained online/offline via Last Will).
+  Build/flash: arduino-cli 1.5.1 (Arduino IDE bundled), FQBN esp32:esp32:esp32c3:CDCOnBoot=cdc, port COM3.
+  Secrets: firmware/sensor_node/secrets.h (gitignored, never read or copy); template in secrets.example.h.
+  Testing: no automated runner; verification = compile + flash + serial/MQTT observation.
+
+strict_tdd: false
+
+testing:
+  runner: none
+  strict_tdd: false
+  reason: "No automated test runner. Firmware verification is compile + flash + serial/MQTT observation."
+  layers:
+    unit: false
+    integration: false
+    e2e: false
+  coverage:
+    available: false
+  quality_tools:
+    linter: false
+    type_checker: false
+    formatter: false
+    compiler_check: "arduino-cli compile (FQBN esp32:esp32:esp32c3:CDCOnBoot=cdc)"
+  manual_verification:
+    - "arduino-cli compile / upload (port COM3)"
+    - "Serial monitor at 115200 baud"
+    - "MQTT observation, e.g. mosquitto_sub -t 'frio/#' -v against localhost:1883"
+
+rules:
+  proposal:
+    - Include rollback plan for risky changes
+    - State which of firmware/ and infra/ is affected
+  specs:
+    - Use Given/When/Then for scenarios
+    - Use RFC 2119 keywords (MUST, SHALL, SHOULD, MAY)
+    - Describe MQTT topics and payload formats explicitly
+  design:
+    - Document architecture decisions with rationale
+    - Note ESP32-C3 constraints (memory, single core, WiFi/MQTT reconnect behavior)
+  tasks:
+    - Group by phase, use hierarchical numbering
+    - Keep tasks completable in one session
+    - Include a manual verification step (compile, flash, serial/MQTT observation) per firmware task
+    - Forecast against the 800-line review budget (delivery_strategy single-pr)
+  apply:
+    guidelines:
+      - Follow existing sketch style (constexpr config, snprintf topics, Serial.printf logging)
+      - Never read, print, or copy firmware/sensor_node/secrets.h
+      - New secrets or settings go in secrets.example.h as placeholders only
+    tdd: false
+    test_command: ""
+  verify:
+    test_command: ""
+    build_command: 'arduino-cli compile --fqbn esp32:esp32:esp32c3:CDCOnBoot=cdc firmware/sensor_node'
+    coverage_threshold: 0
+  archive:
+    - Warn before merging destructive deltas
