@@ -1,79 +1,48 @@
 #include <WiFi.h>
-#include <PubSubClient.h>
-#include <OneWire.h>
-#include <DallasTemperature.h>
-#include "secrets.h"
+#include "app.h"
 
 constexpr uint8_t ONE_WIRE_PIN = 4;
-constexpr uint32_t PUBLISH_INTERVAL_MS = 10000;
 constexpr const char* SITE_ID = "sucursal1";
+constexpr uint32_t PUBLISH_INTERVAL_MS = 10000;
+constexpr uint32_t CONVERSION_MS = 800;        // DS18B20 12-bit needs 750 ms
+constexpr uint32_t MQTT_RETRY_MS = 5000;
+constexpr uint32_t CONNECT_TIMEOUT_MS = 15000;
+constexpr uint32_t LINK_LOSS_MS = 30000;       // grace before failing over
+constexpr uint32_t BROKER_DOWN_MS = 120000;    // link up, broker unreachable
+constexpr uint32_t PROBE_MS = 60000;           // primary probe while on secondary
+constexpr int8_t RETURN_MIN_RSSI = -80;
+constexpr uint8_t RETURN_HITS = 2;
+constexpr uint32_t BACKOFF_MIN_MS = 5000;
+constexpr uint32_t BACKOFF_MAX_MS = 60000;
+constexpr uint32_t HEAP_LOG_MS = 60000;
+constexpr wifi_power_t WIFI_TX_POWER = WIFI_POWER_8_5dBm;
 
-OneWire oneWire(ONE_WIRE_PIN);
-DallasTemperature sensors(&oneWire);
-WiFiClient wifiClient;
-PubSubClient mqtt(wifiClient);
+static uint32_t tHeap = 0;
 
-char statusTopic[48];
-uint32_t lastPublish = 0;
-
-void connectWifi() {
-  if (WiFi.status() == WL_CONNECTED) return;
-  Serial.printf("WiFi: connecting to %s\n", WIFI_SSID);
-  WiFi.mode(WIFI_STA);
-  WiFi.begin(WIFI_SSID, WIFI_PASS);
-  const uint32_t start = millis();
-  while (WiFi.status() != WL_CONNECTED && millis() - start < 20000) {
-    delay(500);
-  }
-  if (WiFi.status() == WL_CONNECTED) {
-    Serial.printf("WiFi: connected, IP %s, RSSI %d dBm\n", WiFi.localIP().toString().c_str(), WiFi.RSSI());
-  } else {
-    Serial.printf("WiFi: failed, status %d\n", WiFi.status());
-  }
-}
-
-void connectMqtt() {
-  if (mqtt.connected() || WiFi.status() != WL_CONNECTED) return;
-  Serial.printf("MQTT: connecting to %s:%d\n", MQTT_HOST, MQTT_PORT);
-  // Last Will: the broker publishes "offline" (retained) if this node drops.
-  if (mqtt.connect(SITE_ID, nullptr, nullptr, statusTopic, 1, true, "offline")) {
-    mqtt.publish(statusTopic, "online", true);
-    Serial.println("MQTT: connected");
-  } else {
-    Serial.printf("MQTT: failed, rc=%d\n", mqtt.state());
-  }
+static void heapLog() {
+  Serial.printf("heap free=%lu min=%lu maxblk=%lu\n", (unsigned long)ESP.getFreeHeap(),
+                (unsigned long)ESP.getMinFreeHeap(), (unsigned long)ESP.getMaxAllocHeap());
 }
 
 void setup() {
   Serial.begin(115200);
-  delay(2000);
-  snprintf(statusTopic, sizeof(statusTopic), "frio/%s/status", SITE_ID);
-  sensors.begin();
-  Serial.printf("Sensors found: %d\n", sensors.getDeviceCount());
-  mqtt.setServer(MQTT_HOST, MQTT_PORT);
-  connectWifi();
+  while (!Serial && millis() < 2000) {}  // bounded CDC wait
+  wifiBegin();      // WiFi.mode() first: the RNG needs RF on
+  settingsBegin();
+  sensingBegin();
+  portalBegin();
+  heapLog();
 }
 
 void loop() {
-  connectWifi();
-  connectMqtt();
-  mqtt.loop();
-
-  if (millis() - lastPublish < PUBLISH_INTERVAL_MS) return;
-  lastPublish = millis();
-
-  sensors.requestTemperatures();
-  const uint8_t count = sensors.getDeviceCount();
-  for (uint8_t i = 0; i < count; i++) {
-    const float t = sensors.getTempCByIndex(i);
-    if (t == DEVICE_DISCONNECTED_C) {
-      Serial.printf("Sensor %d: read error\n", i);
-      continue;
-    }
-    char topic[48], payload[16];
-    snprintf(topic, sizeof(topic), "frio/%s/cam%d/temp", SITE_ID, i + 1);
-    snprintf(payload, sizeof(payload), "%.2f", t);
-    const bool ok = mqtt.connected() && mqtt.publish(topic, payload);
-    Serial.printf("%s = %s C (%s)\n", topic, payload, ok ? "published" : "NOT published");
+  const uint32_t now = millis();
+  wifiTick(now);
+  portalTick(now);
+  mqttTick(now);
+  sensingTick(now);
+  if (now - tHeap >= HEAP_LOG_MS) {
+    tHeap = now;
+    heapLog();
   }
+  delay(2);
 }

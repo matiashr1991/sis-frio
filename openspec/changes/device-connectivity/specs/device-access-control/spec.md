@@ -4,33 +4,43 @@ Verification is manual (serial log / phone / button). TM = exploration test-matr
 
 ## ADDED Requirements
 
-### Requirement: Per-device random password
+### Requirement: Device password source
 
-On first boot the device MUST generate one random password of at least 8 characters, store it in NVS, and print it once on serial for the label. It MUST NOT derive from the chip ID. There MUST be no second admin password.
+The device password MUST be at least 8 characters and MUST NOT derive from the chip ID. If the build defines `DEVICE_PASSWORD` (gitignored `secrets.h`), the device MUST use that value on every boot and MUST NOT print it. Otherwise, on first boot the device MUST generate one random password, store it in NVS, and print it once on serial for the label. There MUST be no second admin password. A fixed shared password is intended for MVP/own devices only; customer devices MUST use the random per-device password.
 
-#### Scenario: First boot
-- GIVEN a device with empty NVS
-- WHEN it boots
+#### Scenario: First boot (random)
+- GIVEN `DEVICE_PASSWORD` is not defined and NVS is empty
+- WHEN the device boots
 - THEN serial shows the password once, of at least 8 characters
 
-#### Scenario: Later boots
-- GIVEN the password was already generated
+#### Scenario: Later boots (random)
+- GIVEN the random password was already generated
 - WHEN the device reboots
 - THEN the password is unchanged and is not printed again
 
-### Requirement: One password protects AP and menu
+#### Scenario: Fixed password
+- GIVEN the build defines `DEVICE_PASSWORD`
+- WHEN the device boots
+- THEN the AP uses that password and serial does not print it
 
-The same password MUST be the WPA2 AP password and the HTTP-auth password for every config endpoint. Stored secrets MUST NOT be returned by any endpoint.
+### Requirement: AP password protects the menu
 
-#### Scenario: Wrong password (TM admin)
-- GIVEN the AP is joined
-- WHEN a config endpoint is requested with a wrong or missing password
-- THEN the response is 401 and no config data is returned
+The device password MUST be the WPA2 AP password, and the config portal MUST be reachable only through that AP (no HTTP-level authentication, since captive-portal browsers cannot answer a Basic-auth prompt). The portal server MUST NOT listen while the AP is down. Stored secrets MUST NOT be returned by any endpoint.
+
+#### Scenario: Wrong AP password
+- GIVEN a phone tries to join the AP with a wrong password
+- WHEN association is attempted
+- THEN the phone is rejected and no config page is reachable
 
 #### Scenario: Correct password
-- GIVEN the AP is joined
-- WHEN the correct password is supplied
-- THEN the wizard loads
+- GIVEN the phone joined the AP with the correct password
+- WHEN it opens the captive popup or http://192.168.4.1
+- THEN the wizard loads without a login prompt
+
+#### Scenario: No secrets returned
+- GIVEN credentials are saved
+- WHEN any endpoint is requested
+- THEN no stored password is present in the response
 
 ### Requirement: BOOT long press enters config mode
 
