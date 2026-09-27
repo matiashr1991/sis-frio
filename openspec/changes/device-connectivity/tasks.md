@@ -68,15 +68,15 @@ Levers to reduce lines without cutting confirmed scope (realistic total saving ~
 
 ## Phase 3: Slice 3, gestures + AP reopen/idle close + anti-flap + infra (~110)
 
-- [ ] 3.1 `infra/mosquitto/mosquitto.conf`: `per_listener_settings true`, :1883 anonymous unchanged, :1884 with `password_file` (~12). Check: config reviewed against design §7.
+- [x] 3.1 `infra/mosquitto/mosquitto.conf`: `per_listener_settings true`, :1883 anonymous unchanged, :1884 with `password_file` (~12). Check: config reviewed against design §7.
 - [ ] 3.2 [H] From `infra/`: `docker run --rm -v ${PWD}/mosquitto:/work eclipse-mosquitto:2 mosquitto_passwd -c -b /work/passwd frio-test <password>` (user picks the password; the file must exist before the compose restart).
-- [ ] 3.3 `infra/docker-compose.yml`: add port `1884:1884` and volume `./mosquitto/passwd:/mosquitto/config/passwd:ro` (~4). Check: `docker compose up -d`; `mosquitto_sub -p 1884 -t '#'` without credentials is refused, with them works; `:1883` unchanged. Spec: Authenticated test listener (Rejection).
+- [x] 3.3 (edit done; the docker check needs the 3.2 password file, [H]) `infra/docker-compose.yml`: add port `1884:1884` and volume `./mosquitto/passwd:/mosquitto/config/passwd:ro` (~4). Check: `docker compose up -d`; `mosquitto_sub -p 1884 -t '#'` without credentials is refused, with them works; `:1883` unchanged. Spec: Authenticated test listener (Rejection).
 - [ ] 3.4 [H] Wizard MQTT test against :1884 with wrong user/password gives `bad_credentials` or `not_authorized`; correct credentials save. Spec: MQTT Failure classes.
-- [ ] 3.5 Create `button.ino`: GPIO9 `INPUT_PULLUP`, arm after first HIGH, 30 ms debounce, classify on release: >= 10 s `factoryReset()` + restart, >= 3 s `apRequest(MANUAL)`, < 3 s nothing (~45); call `buttonTick(now)` from `sensor_node.ino` (~2). Spec: BOOT long press, BOOT 10 s factory reset.
-- [ ] 3.6 `wifi_fsm.ino` + `portal.ino`: on both networks failed request `FALLBACK` AP (no timeout); `BACKOFF` pauses while `softAPgetStationNum()>0`; leaving `BACKOFF/IDLE` for `ONLINE` clears `FALLBACK` (~25). Spec: AP reopens when both down.
-- [ ] 3.7 `portal.ino`: 15 min idle close for `MANUAL` and `PROVISION` (only when `wifi1` exists), timer counts from the last station leaving; never for empty-NVS `PROVISION` or `FALLBACK` (~15). Spec: Config AP idle close (all 4 scenarios).
-- [ ] 3.8 `wifi_fsm.ino`: 10 min hold-off on primary probe/return, set only for broker-triggered failover, not for link-loss failover (~10). Spec: Hold-off after broker-triggered failover.
-- [ ] 3.9 Compile: `BUILD`; record size.
+- [x] 3.5 Create `button.ino`: GPIO9 `INPUT_PULLUP`, arm after first HIGH, 30 ms debounce, classify on release: >= 10 s `factoryReset()` + restart, >= 3 s `apRequest(MANUAL)`, < 3 s nothing (~45); call `buttonTick(now)` from `sensor_node.ino` (~2). Spec: BOOT long press, BOOT 10 s factory reset.
+- [x] 3.6 `wifi_fsm.ino` + `portal.ino`: on both networks failed request `FALLBACK` AP (no timeout); `BACKOFF` pauses while `softAPgetStationNum()>0`; leaving `BACKOFF/IDLE` for `ONLINE` clears `FALLBACK` (~25). Spec: AP reopens when both down.
+- [x] 3.7 `portal.ino`: 15 min idle close for `MANUAL` and `PROVISION` (only when `wifi1` exists), timer counts from the last station leaving; never for empty-NVS `PROVISION` or `FALLBACK` (~15). Spec: Config AP idle close (all 4 scenarios).
+- [x] 3.8 `wifi_fsm.ino`: 10 min hold-off on primary probe/return, set only for broker-triggered failover, not for link-loss failover (~10). Spec: Hold-off after broker-triggered failover.
+- [x] 3.9 Compile: `BUILD`; record size. (RESULT 1,037,045 B = 79%; RAM 39,360 B = 12%; no sketch warnings)
 - [ ] 3.10 [H] Flash; button: < 3 s no change; 3 s opens AP and config survives reboot; 10 s wipes network keys, AP opens with the same label password. Serial shows 3 s/10 s thresholds.
 - [ ] 3.11 [H] Failover with `mosquitto_sub -t 'frio/#' -v`: primary off gives secondary at about 30 s; a blip < 30 s does not switch; `docker stop` broker for 2 min switches; hold-off 10 min respected then normal return; link-loss failover returns without hold-off; flapping primary stays; both off opens the AP still open after 10 min with backoff to 60 s; phone on AP pauses retries; reads continue offline with no publishes.
 - [ ] 3.12 [H] Idle close: 3 s AP with no phone closes at 15 min and the STA resumes; a connected phone keeps it open until 15 min after leaving; empty-NVS AP and FALLBACK AP stay open past 15 min.

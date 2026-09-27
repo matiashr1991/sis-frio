@@ -13,6 +13,7 @@ static uint8_t apMask = 0;
 static bool apUp = false;
 static uint8_t closeMask = 0;   // deferred close so the /api/finish reply gets out first
 static uint32_t closeAt = 0;
+static uint32_t tIdle = 0;      // last time a phone was on the AP (or the reason was requested)
 
 void chipTag(char out[7]) {
   const uint64_t mac = ESP.getEfuseMac();  // byte 0 is the least significant
@@ -40,6 +41,7 @@ static void apStop() {
 }
 
 void apRequest(uint8_t reason) {
+  if (!(apMask & reason)) tIdle = millis();
   apMask |= reason;
   if (!apUp) apStart();
 }
@@ -191,4 +193,14 @@ void portalTick(uint32_t now) {
   if (!apUp) return;
   dns.processNextRequest();
   server.handleClient();
+  // Idle close: MANUAL, and PROVISION only when wifi1 exists. Empty-NVS PROVISION and FALLBACK never time out.
+  if (WiFi.softAPgetStationNum()) {
+    tIdle = now;
+    return;
+  }
+  const uint8_t idle = (apMask & AP_MANUAL) | (g_hasWifi[0] ? (apMask & AP_PROVISION) : 0);
+  if (idle && now - tIdle >= AP_IDLE_MS) {
+    Serial.println("AP idle timeout");
+    apClear(idle);
+  }
 }

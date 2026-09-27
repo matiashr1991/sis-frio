@@ -14,6 +14,11 @@ constexpr int8_t RETURN_MIN_RSSI = -80;
 constexpr uint8_t RETURN_HITS = 2;
 constexpr uint32_t BACKOFF_MIN_MS = 5000;
 constexpr uint32_t BACKOFF_MAX_MS = 60000;
+constexpr uint32_t HOLDOFF_MS = 600000;        // no primary return for 10 min after a broker-triggered failover
+constexpr uint32_t AP_IDLE_MS = 900000;        // MANUAL / saved-config PROVISION AP closes after 15 min with no phone
+constexpr uint32_t BTN_DEBOUNCE_MS = 30;
+constexpr uint32_t BTN_MANUAL_MS = 3000;
+constexpr uint32_t BTN_RESET_MS = 10000;
 constexpr uint32_t HEAP_LOG_MS = 60000;
 constexpr wifi_power_t WIFI_TX_POWER = WIFI_POWER_8_5dBm;
 
@@ -36,6 +41,7 @@ void setup() {
 
 void loop() {
   const uint32_t now = millis();
+  buttonTick(now);
   wifiTick(now);
   portalTick(now);
   mqttTick(now);

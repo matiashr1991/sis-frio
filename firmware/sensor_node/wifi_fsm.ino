@@ -12,6 +12,8 @@ static uint32_t tProbe = 0;
 static uint32_t backoffMs = BACKOFF_MIN_MS;
 static bool scanning = false;
 static uint8_t hits = 0;
+static bool hold = false;      // broker-triggered failover: no primary return until HOLDOFF_MS passed
+static uint32_t tHold = 0;
 
 static void onWifiEvent(arduino_event_id_t event, arduino_event_info_t info) {
   if (event == ARDUINO_EVENT_WIFI_STA_GOT_IP) evGotIp = true;
@@ -80,6 +82,8 @@ static void goOnline(uint32_t now) {
   backoffMs = BACKOFF_MIN_MS;
   scanning = false;
   hits = 0;
+  if (net == 0) hold = false;
+  apClear(AP_FALLBACK);
   Serial.printf("WiFi: online on %s, IP %s, RSSI %d dBm\n", net ? "secondary" : "primary",
                 WiFi.localIP().toString().c_str(), WiFi.RSSI());
 }
@@ -95,10 +99,15 @@ static void attemptFailed(uint32_t now) {
   g_sta = STA_BACKOFF;
   tState = now;
   Serial.printf("WiFi: backoff %lu s\n", (unsigned long)(backoffMs / 1000));
+  apRequest(AP_FALLBACK);  // both networks down: config AP stays open until the STA is back
 }
 
 // While on the secondary: light async scan for the primary, return after 2 stable hits.
 static void probePrimary(uint32_t now) {
+  if (hold) {
+    if (now - tHold < HOLDOFF_MS) return;
+    hold = false;
+  }
   if (scanning) {
     const int n = WiFi.scanComplete();
     if (n == WIFI_SCAN_RUNNING) return;
@@ -113,7 +122,7 @@ static void probePrimary(uint32_t now) {
       Serial.println("WiFi: primary stable, returning");
       connectTo(0, now);
     }
-  } else if (now - tProbe >= PROBE_MS) {
+  } else if (now - tProbe >= PROBE_MS && !WiFi.softAPgetStationNum()) {  // a scan would drop the phone
     tProbe = now;
     scanning = WiFi.scanNetworks(true) == WIFI_SCAN_RUNNING;
   }
@@ -143,6 +152,8 @@ void wifiTick(uint32_t now) {
         tBroker = now;
       } else if (now - tBroker >= BROKER_DOWN_MS && g_hasWifi[other]) {
         Serial.println("WiFi: broker unreachable, switching network");
+        hold = true;
+        tHold = now;
         connectTo(other, now);
         break;
       }
@@ -151,7 +162,10 @@ void wifiTick(uint32_t now) {
 
     case STA_RECOVERING:  // grace period: re-begin the same network at 0 s and 15 s
       if (evGotIp) goOnline(now);
-      else if (now - tState >= LINK_LOSS_MS) connectTo(g_hasWifi[other] ? other : net, now);
+      else if (now - tState >= LINK_LOSS_MS) {
+        hold = false;  // link-loss failover: no hold-off
+        connectTo(g_hasWifi[other] ? other : net, now);
+      }
       else if (now - tRetry >= CONNECT_TIMEOUT_MS) {
         tRetry = now;
         beginNet(net);
@@ -159,7 +173,8 @@ void wifiTick(uint32_t now) {
       break;
 
     case STA_BACKOFF:
-      if (now - tState >= backoffMs) {
+      if (WiFi.softAPgetStationNum()) tState = now;  // phone on the AP: pause retries
+      else if (now - tState >= backoffMs) {
         backoffMs = min<uint32_t>(backoffMs * 2, BACKOFF_MAX_MS);
         connectTo(0, now);
       }

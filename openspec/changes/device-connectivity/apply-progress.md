@@ -85,3 +85,43 @@ Slice 1 without legacy copy: about +369 / -66. Legacy copy: +79.
 - `portal_html.h` restyled: mobile-first CSS (48 px controls, 16 px font, dark mode), step indicator, busy/ok/error message states, buttons disabled while a test runs; JS logic and API contracts unchanged.
 - Compile (`--warnings all`, no sketch warnings): flash 1,035,739 B (79%) of 1,310,720 B with `DEVICE_PASSWORD` defined; 1,036,345 B without `secrets.h`. RAM 39,336 B (12%). `static_assert` verified to fail on a 5-char password.
 - Pending [H]: retest phone join, captive popup and wizard on hardware (2.9-2.12).
+
+## Batch 3 (Slice 3: gestures, FALLBACK/idle AP, hold-off, :1884 infra)
+
+Slices 1 and 2 were verified on hardware before this batch (commit 47bdcc5). Compile-only here (no flash, no docker).
+
+### Completed
+- [x] 3.1 `mosquitto.conf`: `per_listener_settings true`, :1883 anonymous, :1884 with `password_file`, comment with the `mosquitto_passwd` command and how to drop the listener.
+- [x] 3.3 `docker-compose.yml`: port `1884:1884`, volume `./mosquitto/passwd:/mosquitto/config/passwd:ro` (the docker check depends on the human step 3.2).
+- [x] 3.5 `button.ino` (new) + `buttonTick(now)` first in `loop()`: `INPUT_PULLUP` on `BOOT_PIN` (GPIO9, defined by the board variant), armed after the first HIGH read, 30 ms debounce, classified on release with edge timestamps: >= 10 s `factoryReset()` (keeps devpass/schema, restarts into empty-NVS PROVISION), >= 3 s `apRequest(AP_MANUAL)`, otherwise nothing. Logs when 3 s / 10 s are reached and the held time on release.
+- [x] 3.6 `wifi_fsm.ino`: `attemptFailed()` entering `BACKOFF` calls `apRequest(AP_FALLBACK)` (no timeout); `goOnline()` calls `apClear(AP_FALLBACK)`; `BACKOFF` timer is held (`tState = now`) while `softAPgetStationNum() > 0`; the primary probe scan also skips while a phone is on the AP.
+- [x] 3.7 `portal.ino`: `tIdle` (set when a reason is newly requested and every tick a station is present); at the end of `portalTick`, `MANUAL` plus `PROVISION` (only when `g_hasWifi[0]`) clear after `AP_IDLE_MS` (15 min). Empty-NVS `PROVISION` and `FALLBACK` bits are never cleared by the timer.
+- [x] 3.8 `wifi_fsm.ino`: `hold/tHold`; set only in the broker-unreachable branch, cleared on the link-loss failover and when ONLINE on primary; `probePrimary()` returns early for `HOLDOFF_MS` (10 min), then normal 60 s probe / 2 hits at RSSI >= -80 dBm rules.
+- [x] 3.9 Compile: flash 1,037,045 B (79%) of 1,310,720 B; RAM 39,360 B (12%) of 327,680 B; no warnings from sketch code (only 3rd-party OneWire `#undef`).
+
+Note: slice 1 already contained the 30 s link-loss grace, the 2 min broker-down switch (only when another network exists) and the 60 s async scan with 2 stable hits; batch 3 added only the hold-off.
+
+### Pending / human-only (slice 3)
+- [ ] 3.2 [H] create `infra/mosquitto/passwd` with `mosquitto_passwd` (see the command in `mosquitto.conf` / task 3.2), then `docker compose up -d` and check :1884 (anonymous refused, credentials work, :1883 unchanged)
+- [ ] 3.4 [H] wizard MQTT test against :1884: wrong credentials -> `bad_credentials`/`not_authorized`, correct ones save
+- [ ] 3.10 [H] button gestures on hardware
+- [ ] 3.11 [H] failover / hold-off / both-down matrix with router toggling and `docker stop`
+- [ ] 3.12 [H] 15 min idle close and never-close cases
+- Phase 4 (4.1 soak, 4.2 topic audit, 4.3 final build) not started; batch 1/2 [H] items unchanged (0.2, 0.3, 1.8, 1.9, 1.10, 2.9-2.12).
+
+### Work Unit Evidence (Slice 3)
+| Evidence | Value |
+|---|---|
+| Focused test command | `arduino-cli compile --fqbn esp32:esp32:esp32c3:CDCOnBoot=cdc firmware/sensor_node --warnings all`: exit 0, no sketch warnings. |
+| Size | Flash 1,037,045 B (79%); RAM 39,360 B (12%). |
+| Runtime harness | N/A this batch (no flash, no docker allowed). Pending [H] 3.2, 3.4, 3.10-3.12. |
+| Rollback boundary | Delete `button.ino`; revert the slice 3 hunks in `wifi_fsm.ino`, `portal.ino`, `sensor_node.ino`, `app.h`; drop the :1884 block, port and mount from `infra/`. |
+
+### Diff delta (batch 3)
+`button.ino` +45 (new), `wifi_fsm.ino` +21/-3, `portal.ino` +12, `sensor_node.ino` +6, `app.h` +3, `mosquitto.conf` +13, `docker-compose.yml` +2: about +102 / -3.
+
+### Deviations from design
+- `BOOT_PIN` is not declared in the sketch: the ESP32-C3 board variant already defines `BOOT_PIN = 9` (redeclaring it broke the build). Debounce/threshold/idle/hold-off constants are in `sensor_node.ino`.
+- Idle timer clears only the `MANUAL` and (with wifi1) `PROVISION` bits, so a `FALLBACK` bit keeps the AP up.
+- BACKOFF pause restarts the current interval when the phone leaves (rather than resuming the remaining time).
+- 10 s press restarts the board right after the wipe (existing `factoryReset()`), so config mode comes from the empty-NVS boot path.

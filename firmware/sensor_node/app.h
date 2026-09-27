@@ -40,6 +40,9 @@ bool mqttConnected();
 bool mqttPublish(const char* topic, const char* payload);
 bool mqttTest(const MqttCfg& c, const char** reason);
 
+// button.ino
+void buttonTick(uint32_t now);
+
 // sensing.ino
 void sensingBegin();
 void sensingTick(uint32_t now);
