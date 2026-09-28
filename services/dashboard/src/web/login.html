@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#0f172a" />
+    <link rel="icon" href="/icons/icon-192.png" />
+    <title>Frio Dashboard &mdash; Log in</title>
+  </head>
+  <body>
+    <main class="login">
+      <h1>Frio Cold-Room Dashboard</h1>
+      <form id="login-form" class="login__form">
+        <label for="password">Password</label>
+        <input id="password" name="password" type="password" autocomplete="current-password" required autofocus />
+        <button type="submit">Log in</button>
+        <p id="login-error" class="login__error" hidden>Incorrect password.</p>
+      </form>
+    </main>
+    <script type="module" src="./login.ts"></script>
+  </body>
+</html>
