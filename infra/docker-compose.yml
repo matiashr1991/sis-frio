@@ -10,6 +10,21 @@ services:
       - ./mosquitto/passwd:/mosquitto/config/passwd:ro
       - mosquitto-data:/mosquitto/data
 
+  dashboard:
+    build: ../services/dashboard
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      - TZ=America/Argentina/Buenos_Aires
+      - DASHBOARD_PASSWORD=${DASHBOARD_PASSWORD:?set it in infra/.env}
+      - MQTT_URL=mqtt://mosquitto:1883
+      - DB_PATH=/data/frio.db
+    volumes:
+      - dashboard-data:/data
+    depends_on:
+      - mosquitto
+
   nodered:
     image: nodered/node-red:latest
     restart: unless-stopped
@@ -25,3 +40,4 @@ services:
 volumes:
   mosquitto-data:
   nodered-data:
+  dashboard-data:
