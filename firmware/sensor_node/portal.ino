@@ -138,7 +138,7 @@ static void hFinish() {
 }
 
 static void hRedirect() {  // captive-portal probes (Android/iOS/Windows) land here
-  server.sendHeader("Location", "http://192.168.4.1/");
+  server.sendHeader("Location", String("http://") + WiFi.softAPIP().toString() + "/");
   server.send(302, "text/plain", "");
 }
 
