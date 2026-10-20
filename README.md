@@ -1,156 +1,156 @@
 # sis-frio
 
-Cold-room temperature monitoring. ESP32 sensor nodes read DS18B20 probes in each cold room (`cam`), publish the readings over MQTT, and a self-hosted dashboard stores them, shows them live on any phone or browser, and sends Telegram alerts when a room leaves its allowed range or a site goes offline.
+Monitoreo de temperatura de cámaras de frío. Nodos ESP32 leen sondas DS18B20 en cada cámara (`cam`) y publican las lecturas por MQTT. Un dashboard autoalojado las guarda, las muestra en vivo desde cualquier celular o navegador y envía alertas por Telegram cuando una cámara sale de su rango permitido o un sitio queda sin conexión.
 
 ```text
  ┌──────────────┐  MQTT (TLS)   ┌───────────┐  subscribe   ┌──────────────────────────┐  HTTPS/SSE  ┌──────────┐
- │ ESP32 node   │ ────────────▶ │ Mosquitto │ ───────────▶ │ dashboard (Node/Fastify) │ ──────────▶ │ PWA      │
- │ + DS18B20 x N│               │  broker   │              │ SQLite · alerts · API    │             │ (Preact) │
+ │ Nodo ESP32   │ ────────────▶ │ Mosquitto │ ───────────▶ │ dashboard (Node/Fastify) │ ──────────▶ │ PWA      │
+ │ + DS18B20 x N│               │  broker   │              │ SQLite · alertas · API   │             │ (Preact) │
  └──────────────┘               └───────────┘              └────────────┬─────────────┘             └──────────┘
-                                                                        │ alerts
+                                                                        │ alertas
                                                                         ▼
                                                                     Telegram
 ```
 
-## Quick start (local)
+## Inicio rápido (local)
 
-Requirements: Docker with Compose. Node.js 24+ only if you want to run the dashboard outside Docker.
+Requisitos: Docker con Compose. Node.js 24+ solo si se quiere correr el dashboard fuera de Docker.
 
-1. Create the env file and set the dashboard password:
+1. Crear el archivo de entorno y definir la contraseña del dashboard:
    ```bash
-   cp infra/.env.example infra/.env   # then set DASHBOARD_PASSWORD
+   cp infra/.env.example infra/.env   # luego completar DASHBOARD_PASSWORD
    ```
-2. Create the Mosquitto password file (required by the authenticated `:1884` listener, or Mosquitto won't start). From `infra/`:
+2. Crear el archivo de contraseñas de Mosquitto (lo requiere el listener autenticado `:1884`; sin él Mosquitto no arranca). Desde `infra/`:
    ```bash
    docker run --rm -v ${PWD}/mosquitto:/work eclipse-mosquitto:2 mosquitto_passwd -c -b /work/passwd frio-test <password>
    ```
-3. Start the stack:
+3. Levantar el stack:
    ```bash
    cd infra && docker compose up -d --build
    ```
-4. Open `http://localhost:8080`, log in with `DASHBOARD_PASSWORD`, and publish a test reading:
+4. Abrir `http://localhost:8080`, ingresar con `DASHBOARD_PASSWORD` y publicar una lectura de prueba:
    ```bash
    docker compose exec mosquitto mosquitto_pub -t frio/sucursal1/cam1/temp -m 3.5
    ```
-   The site and its room appear on the dashboard in real time.
+   El sitio y su cámara aparecen en el dashboard en tiempo real.
 
-## Repository layout
+## Estructura del repositorio
 
-| Path | What it is |
-|------|------------|
-| `firmware/sensor_node/` | Production firmware for the sensor node (Arduino / ESP32). |
-| `firmware/sensor_node_legacy/` | First prototype: fixed WiFi/MQTT credentials from `secrets.h`. Kept for reference. |
-| `firmware/test_sensor/` | Minimal sketch that only reads the DS18B20 bus. Useful to validate wiring. |
-| `firmware/diag_bus/` | 1-Wire bus diagnostic (pull-up and presence pulse check on GPIO4). |
-| `services/dashboard/` | Backend (ingest, storage, API, alerts) and PWA frontend. |
-| `infra/` | Docker Compose stack for local development: Mosquitto, dashboard, Node-RED. |
+| Ruta | Qué es |
+|------|--------|
+| `firmware/sensor_node/` | Firmware de producción del nodo sensor (Arduino / ESP32). |
+| `firmware/sensor_node_legacy/` | Primer prototipo: credenciales WiFi/MQTT fijas en `secrets.h`. Se conserva como referencia. |
+| `firmware/test_sensor/` | Sketch mínimo que solo lee el bus DS18B20. Útil para validar el cableado. |
+| `firmware/diag_bus/` | Diagnóstico del bus 1-Wire (pull-up y pulso de presencia en GPIO4). |
+| `services/dashboard/` | Backend (ingesta, almacenamiento, API, alertas) y frontend PWA. |
+| `infra/` | Stack de Docker Compose para desarrollo local: Mosquitto, dashboard, Node-RED. |
 
-## How it works
+## Cómo funciona
 
-### 1. Sensor node (firmware)
+### 1. Nodo sensor (firmware)
 
-- **Hardware:** an ESP32 board (developed on an ESP32-C3, BOOT button on GPIO9) with one or more DS18B20 probes on a single 1-Wire bus on **GPIO4**, with a 4.7 kΩ pull-up to 3.3 V. Each probe found on the bus becomes one room: `cam1`, `cam2`, ...
-- **Sensing:** non-blocking cycle every 10 s (12-bit conversion, ~750 ms). If no probe is found at boot, the bus is rescanned every cycle.
-- **Provisioning from a phone:** on first boot (or on demand) the node opens a WPA2 access point `frio-XXXXXX` with a captive portal (it opens automatically when the phone joins). From there you configure a **primary and a secondary WiFi** and the **MQTT broker**; each step is tested before it is saved. Settings live in NVS.
-- **Device password:** the AP password is random per device (generated once, stored in NVS, printed once on the serial monitor). A fixed password can be set in `secrets.h` (copy `secrets.example.h`), but only for your own devices.
-- **Failover:** a non-blocking WiFi state machine switches to the secondary network when the primary link drops (30 s grace) or the broker is unreachable (2 min), probes the primary every minute, and returns when its signal is good enough. Reconnects use exponential backoff (5 s – 60 s).
-- **BOOT button gestures:**
+- **Hardware:** una placa ESP32 (desarrollado sobre ESP32-C3, botón BOOT en GPIO9) con una o más sondas DS18B20 en un único bus 1-Wire en **GPIO4**, con pull-up de 4,7 kΩ a 3,3 V. Cada sonda detectada en el bus se convierte en una cámara: `cam1`, `cam2`, ...
+- **Medición:** ciclo no bloqueante cada 10 s (conversión de 12 bits, ~750 ms). Si al arrancar no se detecta ninguna sonda, el bus se vuelve a escanear en cada ciclo.
+- **Configuración desde el celular:** en el primer arranque (o a pedido) el nodo abre un access point WPA2 `frio-XXXXXX` con un portal cautivo (se abre solo al conectar el celular). Desde ahí se configuran una **WiFi principal y una secundaria** y el **broker MQTT**; cada paso se prueba antes de guardarse. La configuración se guarda en NVS.
+- **Contraseña del dispositivo:** la contraseña del AP es aleatoria por dispositivo (se genera una vez, se guarda en NVS y se imprime una sola vez por el monitor serie). Se puede fijar una contraseña en `secrets.h` (copiando `secrets.example.h`), pero solo para dispositivos propios.
+- **Failover:** una máquina de estados WiFi no bloqueante pasa a la red secundaria cuando se cae el enlace principal (30 s de gracia) o el broker no responde (2 min), prueba la principal cada minuto y vuelve cuando su señal es suficiente. Las reconexiones usan backoff exponencial (5 s – 60 s).
+- **Gestos del botón BOOT:**
 
-  | Hold | Action |
-  |------|--------|
-  | ≥ 3 s | Open the config AP manually (closes after 15 min without a phone connected). |
-  | ≥ 10 s | Factory reset of the network config (the device password is kept). |
+  | Mantener | Acción |
+  |----------|--------|
+  | ≥ 3 s | Abre manualmente el AP de configuración (se cierra tras 15 min sin un celular conectado). |
+  | ≥ 10 s | Reset de fábrica de la configuración de red (la contraseña del dispositivo se conserva). |
 
-- **MQTT:** always over TLS (port 8883), validating the broker against the CA bundle in `mqtt_ca.h`.
+- **MQTT:** siempre sobre TLS (puerto 8883), validando el broker contra el bundle de CA en `mqtt_ca.h`.
 
-### 2. MQTT contract
+### 2. Contrato MQTT
 
-| Topic | Payload | Notes |
+| Topic | Payload | Notas |
 |-------|---------|-------|
-| `frio/<site>/cam<N>/temp` | Plain float, e.g. `3.50` | °C. Readings outside -55 … 125 are dropped. |
-| `frio/<site>/status` | `online` \| `offline` | Retained. `offline` is the MQTT Last Will. |
-| `frio/<site>/net` | `primary` \| `secondary` | Retained. Which WiFi network carries the session. |
+| `frio/<site>/cam<N>/temp` | Número decimal, p. ej. `3.50` | °C. Se descartan lecturas fuera de -55 … 125. |
+| `frio/<site>/status` | `online` \| `offline` | Retenido. `offline` es el Last Will de MQTT. |
+| `frio/<site>/net` | `primary` \| `secondary` | Retenido. Indica qué red WiFi transporta la sesión. |
 
-`<site>` and `<cam>` must match `[A-Za-z0-9_-]{1,64}`. The site id is set by `SITE_ID` in `sensor_node.ino`.
+`<site>` y `<cam>` deben cumplir `[A-Za-z0-9_-]{1,64}`. El id del sitio se define con `SITE_ID` en `sensor_node.ino`.
 
-### 3. Dashboard service
+### 3. Servicio dashboard
 
-- **Ingest:** subscribes to the three topics above, validates every message, and drops anything malformed without crashing.
-- **Storage:** SQLite (`better-sqlite3`). Readings older than `RETENTION_DAYS` are purged.
-- **Live updates:** server-sent events (`/api/stream`). A room with no reading for `STALE_AFTER_MS` is shown as stale.
-- **Alerts:** per-room min/max thresholds configured from the dashboard. An alert opens once when a reading crosses a threshold (or a site goes offline) and closes when it returns to normal; both events notify Telegram.
-- **Access:** single shared password, session cookie, rate-limited login.
-- **Frontend:** installable PWA built with Preact + signals, live room tiles, and history charts with uPlot.
+- **Ingesta:** se suscribe a los tres topics anteriores, valida cada mensaje y descarta lo malformado sin caerse.
+- **Almacenamiento:** SQLite (`better-sqlite3`). Las lecturas más antiguas que `RETENTION_DAYS` se purgan.
+- **Tiempo real:** server-sent events (`/api/stream`). Una cámara sin lecturas durante `STALE_AFTER_MS` se muestra como desactualizada.
+- **Alertas:** umbrales mínimo/máximo por cámara, configurables desde el dashboard. Una alerta se abre una sola vez cuando una lectura cruza un umbral (o un sitio queda offline) y se cierra cuando vuelve a la normalidad; ambos eventos se notifican por Telegram.
+- **Acceso:** contraseña única compartida, cookie de sesión y login con rate limit.
+- **Frontend:** PWA instalable hecha con Preact + signals, tarjetas de cámaras en vivo y gráficos históricos con uPlot.
 
 #### API
 
-| Method | Path | Purpose |
-|--------|------|---------|
-| `POST` | `/api/login`, `/api/logout` | Session handling. |
-| `GET` | `/api/sites` | Sites, rooms, latest readings and status. |
-| `GET` | `/api/history` | Reading history for the charts. |
-| `GET` | `/api/stream` | Live updates (SSE). |
-| `PUT` | `/api/config/:site/:cam` | Room label and min/max thresholds. |
+| Método | Ruta | Uso |
+|--------|------|-----|
+| `POST` | `/api/login`, `/api/logout` | Manejo de sesión. |
+| `GET` | `/api/sites` | Sitios, cámaras, últimas lecturas y estado. |
+| `GET` | `/api/history` | Historial de lecturas para los gráficos. |
+| `GET` | `/api/stream` | Actualizaciones en vivo (SSE). |
+| `PUT` | `/api/config/:site/:cam` | Nombre de la cámara y umbrales mínimo/máximo. |
 | `GET` | `/healthz` | Health check. |
 
-#### Configuration
+#### Configuración
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `DASHBOARD_PASSWORD` | — (required) | Login password. |
-| `MQTT_URL` | `mqtt://mosquitto:1883` | Broker URL. |
-| `MQTT_USERNAME` / `MQTT_PASSWORD` | empty | Broker credentials, if needed. |
-| `DB_PATH` | `/data/frio.db` | SQLite file. |
-| `PORT` | `8080` | HTTP port. |
-| `RETENTION_DAYS` | `30` | Days of readings kept. |
-| `STALE_AFTER_MS` | `30000` | Time without data before a room is marked stale. |
-| `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` | empty | Enable Telegram alerts when both are set. |
+| Variable | Valor por defecto | Descripción |
+|----------|-------------------|-------------|
+| `DASHBOARD_PASSWORD` | — (obligatoria) | Contraseña de ingreso. |
+| `MQTT_URL` | `mqtt://mosquitto:1883` | URL del broker. |
+| `MQTT_USERNAME` / `MQTT_PASSWORD` | vacío | Credenciales del broker, si hacen falta. |
+| `DB_PATH` | `/data/frio.db` | Archivo SQLite. |
+| `PORT` | `8080` | Puerto HTTP. |
+| `RETENTION_DAYS` | `30` | Días de lecturas que se conservan. |
+| `STALE_AFTER_MS` | `30000` | Tiempo sin datos antes de marcar una cámara como desactualizada. |
+| `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` | vacío | Habilitan las alertas por Telegram cuando ambas están definidas. |
 
-### 4. Local infrastructure
+### 4. Infraestructura local
 
-`infra/docker-compose.yml` runs:
+`infra/docker-compose.yml` levanta:
 
-| Service | Port | Notes |
-|---------|------|-------|
-| Mosquitto | `1883` | Anonymous, for development only. |
-| Mosquitto | `1884` | Requires a user from `infra/mosquitto/passwd`. |
-| Dashboard | `8080` | Built from `services/dashboard`. |
-| Node-RED | `1880` | Optional, for flow experiments. |
+| Servicio | Puerto | Notas |
+|----------|--------|-------|
+| Mosquitto | `1883` | Anónimo, solo para desarrollo. |
+| Mosquitto | `1884` | Requiere un usuario de `infra/mosquitto/passwd`. |
+| Dashboard | `8080` | Se construye desde `services/dashboard`. |
+| Node-RED | `1880` | Opcional, para experimentar con flujos. |
 
-> The local broker has no TLS. Production firmware connects with TLS on port 8883, so point it to a broker with a TLS listener (or adapt the firmware) when testing against `infra/`.
+> El broker local no tiene TLS. El firmware de producción se conecta con TLS en el puerto 8883, así que para probar contra `infra/` hay que apuntarlo a un broker con listener TLS (o adaptar el firmware).
 
-## Development
+## Desarrollo
 
 ### Dashboard
 
 ```bash
 cd services/dashboard
 npm install
-npm run dev:server   # backend with watch (needs DASHBOARD_PASSWORD and a reachable MQTT_URL)
-npm run dev:web      # Vite dev server for the PWA
+npm run dev:server   # backend en modo watch (requiere DASHBOARD_PASSWORD y un MQTT_URL accesible)
+npm run dev:web      # servidor de desarrollo de Vite para la PWA
 npm run check        # typecheck + tests + build
 ```
 
-Tests use the built-in Node test runner (`npm test`).
+Los tests usan el test runner nativo de Node (`npm test`).
 
 ### Firmware
 
-1. Install the Arduino IDE (or `arduino-cli`) with the **esp32** board package.
-2. Install the libraries: `OneWire`, `DallasTemperature`, `PubSubClient`.
-3. Optional: copy `firmware/sensor_node/secrets.example.h` to `secrets.h` (gitignored) to set a fixed device password.
-4. Adjust `SITE_ID` and the timing constants in `sensor_node.ino` if needed.
-5. Flash `firmware/sensor_node/`, open the serial monitor at 115200 baud, and note the device password.
-6. Connect your phone to `frio-XXXXXX` and complete the setup in the portal.
+1. Instalar Arduino IDE (o `arduino-cli`) con el paquete de placas **esp32**.
+2. Instalar las librerías: `OneWire`, `DallasTemperature`, `PubSubClient`.
+3. Opcional: copiar `firmware/sensor_node/secrets.example.h` a `secrets.h` (ignorado por git) para fijar la contraseña del dispositivo.
+4. Ajustar `SITE_ID` y las constantes de tiempo en `sensor_node.ino` si hace falta.
+5. Flashear `firmware/sensor_node/`, abrir el monitor serie a 115200 baudios y anotar la contraseña del dispositivo.
+6. Conectar el celular a `frio-XXXXXX` y completar la configuración en el portal.
 
-If no probes are detected, flash `firmware/test_sensor/` or `firmware/diag_bus/` to check the wiring.
+Si no se detectan sondas, flashear `firmware/test_sensor/` o `firmware/diag_bus/` para revisar el cableado.
 
-## Tech stack
+## Stack tecnológico
 
-| Layer | Technology |
-|-------|-----------|
-| Firmware | ESP32, Arduino framework, OneWire, DallasTemperature, PubSubClient, WiFiClientSecure |
-| Messaging | MQTT, Eclipse Mosquitto 2 |
+| Capa | Tecnología |
+|------|------------|
+| Firmware | ESP32, framework Arduino, OneWire, DallasTemperature, PubSubClient, WiFiClientSecure |
+| Mensajería | MQTT, Eclipse Mosquitto 2 |
 | Backend | Node.js 24, TypeScript, Fastify 5, mqtt.js, better-sqlite3 |
 | Frontend | Preact, @preact/signals, uPlot, Vite, vite-plugin-pwa |
-| Notifications | Telegram Bot API |
-| Infra | Docker, Docker Compose |
+| Notificaciones | Telegram Bot API |
+| Infraestructura | Docker, Docker Compose |
