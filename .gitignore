@@ -3,3 +3,5 @@ infra/mosquitto/passwd
 infra/.env
 services/dashboard/node_modules
 services/dashboard/dist
+.claude/settings.local.json
+openspec/
